@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Universal Data Formatter
 
-## Getting Started
+A client-side tool for converting, validating, and beautifying structured
+data — JSON, CSV, XML, YAML, and plain text. Everything runs in the
+browser; no input ever leaves the page.
 
-First, run the development server:
+## Setup
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). `npm run build && npm run start` produces a production build; `npm run lint` runs ESLint.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Usage
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Get data in.** Paste it, type it, drag a file onto the input pane, or click "Upload". Pasting auto-detects the format (JSON/CSV/XML/YAML/text); override it any time with the Format selector.
+2. **Pick an action.** The action bar changes based on the input format — e.g. JSON gets Prettify/Minify/Validate/Sort keys/Convert, while plain text gets case transforms and escape/unescape helpers.
+3. **Read the output.** The right pane shows the result, with line/column-accurate error messages if the input doesn't parse. A parse error never clears your input.
+4. **Copy, download, or swap.** "Swap ⇄" moves the output back into the input pane (handy for chaining conversions), "Copy" hits the clipboard, "Download" saves a file with the right extension.
+5. **Diff and Schema tabs.** "Diff" shows a line-level diff between input and output. "Schema" (JSON output only) infers a TypeScript interface or JSON Schema from the current value.
+6. **Presets.** After running an action, "Save preset" remembers that format + action combo for the rest of the session (in-memory only, not persisted to disk/localStorage).
+7. **Ctrl/Cmd+Enter** re-runs the last action against the current input immediately, without waiting for the debounce.
 
-## Learn More
+## Supported operations
 
-To learn more about Next.js, take a look at the following resources:
+- Prettify / minify, with 2-space, 4-space, or tab indentation
+- Validate, with line/column-accurate syntax errors
+- Sort object keys recursively (JSON) or array items by key/column (JSON array, CSV)
+- Convert JSON ↔ CSV, JSON ↔ YAML, JSON ↔ XML
+- Case transforms: UPPERCASE, lowercase, Title Case, camelCase, snake_case
+- Trim whitespace, remove blank lines, de-duplicate lines/rows/items
+- Escape/unescape: JSON string, URL, HTML entities, Base64
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Design notes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Real parsers, not regex.** CSV goes through [PapaParse](https://www.papaparse.com/) (handles quoted commas and escaped quotes); XML goes through the browser's `DOMParser`/`XMLSerializer`; YAML goes through [js-yaml](https://github.com/nodeca/js-yaml).
+- **CodeMirror 6** (`@uiw/react-codemirror`) powers both panes for syntax highlighting. CodeMirror virtualizes its own rendering, so large documents (10k+ lines) stay responsive.
+- **Debounced parsing.** Typing updates the input pane instantly, but re-parsing is debounced ~300ms so a large paste doesn't parse on every keystroke. Clicking an action button or changing the format/indent runs immediately, bypassing the debounce.
+- **Never throws to the console.** Every parser/converter returns a `{ ok, value | error }` result instead of throwing; the UI renders errors inline and leaves the input untouched.
+- **Nothing is sent anywhere.** No network calls, no backend. Format/action/preset state lives only in React state for the session — closing the tab clears it.
 
-## Deploy on Vercel
+## Project layout
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+app/page.tsx           Main app: state, layout, wiring
+components/            Editor pane, status bar, error banner, diff view, schema panel
+lib/
+  types.ts             Shared types (DataFormat, ActionId, ParseResult, ...)
+  detect.ts            Format auto-detection heuristic
+  actions.ts            Dispatches an ActionId to the right operation for the current format
+  convert.ts            JSON ↔ CSV / YAML / XML conversion
+  caseTransform.ts       UPPERCASE / lowercase / Title Case / camelCase / snake_case
+  escape.ts              JSON string / URL / HTML entity / Base64 escape-unescape
+  textOps.ts             Trim whitespace, remove blank lines, de-dupe lines
+  schemaInference.ts     TypeScript interface / JSON Schema inference from a JSON sample
+  diff.ts                Line-level diff for the Diff tab
+  formats/               Per-format parse/prettify/minify (json.ts, csv.ts, xml.ts, yaml.ts, text.ts)
+```
