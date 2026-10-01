@@ -27,6 +27,7 @@ export default function FormatterApp() {
 
   const [outputText, setOutputText] = useState("");
   const [error, setError] = useState<ParseError | null>(null);
+  const [ioError, setIoError] = useState<ParseError | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("output");
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -75,15 +76,23 @@ export default function FormatterApp() {
 
   // Immediate (non-debounced) reprocessing when the action/format/options change via UI controls.
   useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate: re-run on action/format/option change
     process(inputText);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [process]);
 
-  const outputFormat = effectiveOutputFormat(inputFormat, lastAction);
+  const outputFormat = error ? inputFormat : effectiveOutputFormat(inputFormat, lastAction);
+  const activeViewMode = viewMode === "schema" && outputFormat !== "json" ? "output" : viewMode;
   const availableActions = ACTIONS_BY_FORMAT[inputFormat];
 
-  const handleRunAction = (action: ActionId) => setLastAction(action);
+  const handleRunAction = (action: ActionId) => {
+    clearTimeout(debounceTimer.current);
+    setLastAction(action);
+    const result = runAction(inputFormat, action, inputText, options);
+    setOutputText(result.output);
+    setError(result.error);
+  };
 
   const handleFormatChange = (format: DataFormat) => {
     setInputFormat(format);
@@ -92,10 +101,14 @@ export default function FormatterApp() {
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
     const text = e.clipboardData.getData("text");
-    if (text) setInputFormat(detectFormat(text));
+    if (text) {
+      setInputFormat(detectFormat(text));
+      setLastAction(null);
+    }
   }, []);
 
   const loadFile = useCallback((file: File) => {
+    setIoError(null);
     const reader = new FileReader();
     reader.onload = () => {
       const text = String(reader.result ?? "");
@@ -103,6 +116,7 @@ export default function FormatterApp() {
       setInputFormat(detectFormat(text));
       setLastAction(null);
     };
+    reader.onerror = () => setIoError({ message: "Unable to read this file. Please try again." });
     reader.readAsText(file);
   }, []);
 
@@ -126,10 +140,13 @@ export default function FormatterApp() {
     setError(null);
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(outputText).catch(() => {
-      // Clipboard access can be denied by the browser; fail silently rather than throwing.
-    });
+  const handleCopy = async () => {
+    setIoError(null);
+    try {
+      await navigator.clipboard.writeText(outputText);
+    } catch {
+      setIoError({ message: "Clipboard access failed. Select and copy the output manually." });
+    }
   };
 
   const handleDownload = () => {
@@ -163,6 +180,7 @@ export default function FormatterApp() {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
+        clearTimeout(debounceTimer.current);
         process(inputText);
       }
     };
@@ -234,6 +252,7 @@ export default function FormatterApp() {
           <div className="flex items-center gap-1">
             <input
               placeholder="column / key"
+              aria-label="Sort column or key"
               value={sortColumn}
               onChange={(e) => setSortColumn(e.target.value)}
               className="border rounded px-1 py-0.5 bg-transparent border-neutral-300 dark:border-neutral-700 w-28"
@@ -308,7 +327,7 @@ export default function FormatterApp() {
                   key={mode}
                   onClick={() => setViewMode(mode)}
                   className={`px-2 py-0.5 rounded ${
-                    viewMode === mode
+                    activeViewMode === mode
                       ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
                       : "bg-neutral-100 dark:bg-neutral-800"
                   }`}
@@ -331,11 +350,12 @@ export default function FormatterApp() {
           </div>
 
           {error && <ErrorBanner error={error} />}
+          {ioError && <ErrorBanner error={ioError} />}
 
           <div className="flex-1 min-h-0">
-            {viewMode === "output" && <Editor value={outputText} format={outputFormat} readOnly darkMode={darkMode} />}
-            {viewMode === "diff" && <DiffView before={inputText} after={outputText} />}
-            {viewMode === "schema" && outputFormat === "json" && <SchemaPanel jsonInput={outputText} />}
+            {activeViewMode === "output" && <Editor value={outputText} format={outputFormat} readOnly darkMode={darkMode} />}
+            {activeViewMode === "diff" && <DiffView before={inputText} after={outputText} />}
+            {activeViewMode === "schema" && <SchemaPanel jsonInput={outputText} />}
           </div>
           <StatusBar text={outputText} />
         </section>

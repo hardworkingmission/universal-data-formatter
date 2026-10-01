@@ -140,6 +140,14 @@ function wrapParseResult(result: { ok: true; value: string } | { ok: false; erro
 
 /** Central dispatcher: given the current pane format + chosen action, produce the next output. */
 export function runAction(format: DataFormat, action: ActionId, input: string, options: ActionOptions): ActionResult {
+  try {
+    return dispatchAction(format, action, input, options);
+  } catch (err) {
+    return { output: input, error: { message: err instanceof Error ? err.message : "Operation failed" } };
+  }
+}
+
+function dispatchAction(format: DataFormat, action: ActionId, input: string, options: ActionOptions): ActionResult {
   const { indent } = options;
 
   switch (action) {

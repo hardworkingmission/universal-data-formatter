@@ -12,64 +12,29 @@ function typeOf(value: unknown): JsType {
   return "any";
 }
 
-function tsTypeName(value: unknown, name: string, out: string[]): string {
-  const t = typeOf(value);
-  switch (t) {
-    case "string":
-      return "string";
-    case "number":
-      return "number";
-    case "boolean":
-      return "boolean";
-    case "null":
-      return "null";
-    case "array": {
-      const arr = value as unknown[];
-      if (arr.length === 0) return "unknown[]";
-      const elType = tsTypeName(arr[0], name, out);
-      return `${elType}[]`;
-    }
-    case "object":
-      return buildInterface(value as Record<string, unknown>, name, out);
-    default:
-      return "unknown";
+function tsTypeName(value: unknown, depth = 0): string {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "unknown[]";
+    const types = [...new Set(value.map((item) => tsTypeName(item, depth)))];
+    return `(${types.join(" | ")})[]`;
   }
+  if (value !== null && typeof value === "object") {
+    const pad = "  ".repeat(depth);
+    const fields = Object.entries(value)
+      .map(([key, val]) => `${pad}  ${JSON.stringify(key)}: ${tsTypeName(val, depth + 1)};`)
+      .join("\n");
+    return `{\n${fields}\n${pad}}`;
+  }
+  return typeOf(value);
 }
 
-function pascalCase(name: string): string {
-  return name
-    .replace(/[^a-zA-Z0-9]+(.)/g, (_, c) => c.toUpperCase())
-    .replace(/^./, (c) => c.toUpperCase());
-}
-
-function buildInterface(obj: Record<string, unknown>, name: string, out: string[]): string {
-  const interfaceName = pascalCase(name) || "Root";
-  const fields = Object.entries(obj)
-    .map(([key, val]) => `  ${key}: ${tsTypeName(val, key, out)};`)
-    .join("\n");
-  out.push(`interface ${interfaceName} {\n${fields}\n}`);
-  return interfaceName;
-}
-
-/** Generates a best-effort TypeScript interface from a sample JSON value. */
+/** Generates a TypeScript type covering every value in the sample. */
 export function inferTypeScript(input: string): ParseResult<string> {
   const parsed = parseJson(input);
   if (!parsed.ok) return parsed;
-
-  const value = parsed.value;
-  const out: string[] = [];
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) return { ok: true, value: "type Root = unknown[];" };
-    tsTypeName(value[0], "Root", out);
-    out.push("type Root = RootItem[];".replace("RootItem", pascalCase("Root")));
-    return { ok: true, value: out.join("\n\n") };
-  }
-  if (value !== null && typeof value === "object") {
-    buildInterface(value as Record<string, unknown>, "Root", out);
-    return { ok: true, value: out.reverse().join("\n\n") };
-  }
-  return { ok: true, value: `type Root = ${typeOf(value)};` };
+  const type = tsTypeName(parsed.value);
+  const isObject = parsed.value !== null && typeof parsed.value === "object" && !Array.isArray(parsed.value);
+  return { ok: true, value: isObject ? `interface Root ${type}` : `type Root = ${type};` };
 }
 
 function jsonSchemaType(value: unknown): Record<string, unknown> {
@@ -85,11 +50,13 @@ function jsonSchemaType(value: unknown): Record<string, unknown> {
       return { type: "null" };
     case "array": {
       const arr = value as unknown[];
-      return { type: "array", items: arr.length > 0 ? jsonSchemaType(arr[0]) : {} };
+      const schemas = [...new Set(arr.map((item) => JSON.stringify(jsonSchemaType(item))))]
+        .map((schema) => JSON.parse(schema));
+      return { type: "array", items: schemas.length === 0 ? {} : schemas.length === 1 ? schemas[0] : { anyOf: schemas } };
     }
     case "object": {
       const obj = value as Record<string, unknown>;
-      const properties: Record<string, unknown> = {};
+      const properties: Record<string, unknown> = Object.create(null);
       Object.entries(obj).forEach(([k, v]) => {
         properties[k] = jsonSchemaType(v);
       });

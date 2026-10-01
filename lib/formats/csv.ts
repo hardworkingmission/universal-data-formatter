@@ -16,8 +16,10 @@ export function parseCsv(input: string): ParseResult<CsvTable> {
     skipEmptyLines: true,
   });
 
-  if (result.errors.length > 0) {
-    const first = result.errors[0];
+  // A single-column CSV is valid even when there is no delimiter to detect.
+  const errors = result.errors.filter((error) => error.code !== "UndetectableDelimiter");
+  if (errors.length > 0) {
+    const first = errors[0];
     const error: ParseError = {
       message: first.message,
       line: typeof first.row === "number" ? first.row + 2 : undefined,

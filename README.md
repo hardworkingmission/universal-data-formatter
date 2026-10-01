@@ -6,12 +6,44 @@ browser; no input ever leaves the page.
 
 ## Setup
 
+Use Node.js **24.x** (also specified in `.nvmrc` and `package.json`).
+
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). `npm run build && npm run start` produces a production build; `npm run lint` runs ESLint.
+
+## Verification
+
+```bash
+npx playwright install chromium
+npm run check
+```
+
+This runs ESLint, TypeScript, regression tests (including browser interactions),
+and the production build. Tests cover XML content preservation, conversion errors,
+schema generation, and switching output formats. To use an installed Chrome browser
+instead, set `PLAYWRIGHT_CHANNEL=chrome` when running tests.
+
+## Deploy to Vercel
+
+1. Push this project, including `package-lock.json`, to your Git repository.
+2. Import the repository in Vercel and choose **Next.js** as the framework.
+3. Set the root directory to this project's directory (`./` for a standalone repository).
+4. Use Node.js **24.x**, install command `npm ci`, and build command `npm run build`.
+   Keep the output directory at the framework default.
+5. Deploy and check formatting, conversion, copy/download, and the mobile layout
+   on the preview URL before promoting it to production.
+
+No environment variables, database, or API keys are required. Vercel's native
+Next.js integration handles the deployment; a custom `vercel.json` is unnecessary.
+All data processing remains in the browser. System fonts avoid network downloads
+during the build.
+
+See [Vercel build settings](https://vercel.com/docs/builds/configure-a-build) and
+[supported Node.js versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions).
 
 ## Usage
 
@@ -34,6 +66,13 @@ Open [http://localhost:3000](http://localhost:3000). `npm run build && npm run s
 - Escape/unescape: JSON string, URL, HTML entities, Base64
 
 ## Design notes
+
+- **Conversion limits.** XML-to-JSON groups repeated elements into arrays and uses
+  `@name` for attributes and `#text` for text. This mapping does not preserve the
+  ordering of mixed XML content, so XML/JSON conversion is not a lossless round trip.
+  CSV numbers are inferred only when their spelling and integer precision can be
+  preserved; identifiers such as `001` remain strings. Cyclic YAML aliases cannot
+  be represented as JSON and produce an inline error.
 
 - **Real parsers, not regex.** CSV goes through [PapaParse](https://www.papaparse.com/) (handles quoted commas and escaped quotes); XML goes through the browser's `DOMParser`/`XMLSerializer`; YAML goes through [js-yaml](https://github.com/nodeca/js-yaml).
 - **CodeMirror 6** (`@uiw/react-codemirror`) powers both panes for syntax highlighting. CodeMirror virtualizes its own rendering, so large documents (10k+ lines) stay responsive.

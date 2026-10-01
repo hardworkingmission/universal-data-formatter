@@ -16,7 +16,8 @@ function coerceCsvValue(raw: string): string | number | boolean | null {
   if (raw === "") return "";
   if (raw === "true") return true;
   if (raw === "false") return false;
-  if (raw.trim() !== "" && !Number.isNaN(Number(raw))) return Number(raw);
+  const number = Number(raw);
+  if (Number.isFinite(number) && String(number) === raw && (!Number.isInteger(number) || Number.isSafeInteger(number))) return number;
   return raw;
 }
 
@@ -33,7 +34,7 @@ export function jsonToCsv(input: string): ParseResult<string> {
     const fields = Array.from(fieldSet);
     const data = rows.map((r) => {
       const obj = r as Record<string, unknown>;
-      const out: Record<string, string> = {};
+      const out: Record<string, string> = Object.create(null);
       fields.forEach((f) => {
         const v = obj[f];
         out[f] = v === undefined || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
@@ -44,7 +45,7 @@ export function jsonToCsv(input: string): ParseResult<string> {
   }
 
   // Array of primitives (or a single primitive) — fall back to one "value" column.
-  const data = rows.map((v) => ({ value: v === null || v === undefined ? "" : String(v) }));
+  const data = rows.map((v) => ({ value: v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v) }));
   return { ok: true, value: Papa.unparse({ fields: ["value"], data }) };
 }
 
@@ -52,7 +53,7 @@ export function csvToJson(input: string, indent: IndentSize): ParseResult<string
   const parsed = parseCsv(input);
   if (!parsed.ok) return parsed;
   const objects = parsed.value.rows.map((row) => {
-    const out: Record<string, unknown> = {};
+    const out: Record<string, unknown> = Object.create(null);
     for (const [k, v] of Object.entries(row)) out[k] = coerceCsvValue(v);
     return out;
   });
@@ -70,13 +71,21 @@ export function jsonToYaml(input: string, indentSize: number): ParseResult<strin
 export function yamlToJson(input: string, indent: IndentSize): ParseResult<string> {
   const parsed = parseYaml(input);
   if (!parsed.ok) return parsed;
-  return { ok: true, value: JSON.stringify(parsed.value, null, indentString(indent)) };
+  try {
+    return { ok: true, value: JSON.stringify(parsed.value ?? null, null, indentString(indent)) };
+  } catch {
+    return { ok: false, error: { message: "This YAML contains circular references and cannot be represented as JSON." } };
+  }
 }
 
 // ---------- JSON <-> XML ----------
 
 const XML_ATTR_PREFIX = "@";
 const XML_TEXT_KEY = "#text";
+
+function escapeXml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 
 function isValidTagName(name: string): boolean {
   return /^[A-Za-z_][\w.-]*$/.test(name);
@@ -94,7 +103,11 @@ function jsonValueToXml(key: string, value: unknown, depth: number, indent: stri
     const entries = Object.entries(value as Record<string, unknown>);
     const attrs = entries
       .filter(([k]) => k.startsWith(XML_ATTR_PREFIX))
-      .map(([k, v]) => ` ${k.slice(1)}="${String(v).replace(/"/g, "&quot;")}"`)
+      .map(([k, v]) => {
+        const name = k.slice(1);
+        if (!isValidTagName(name)) throw new Error(`Invalid XML attribute name: ${name}`);
+        return ` ${name}="${escapeXml(String(v))}"`;
+      })
       .join("");
     const children = entries.filter(([k]) => !k.startsWith(XML_ATTR_PREFIX) && k !== XML_TEXT_KEY);
     const textEntry = entries.find(([k]) => k === XML_TEXT_KEY);
@@ -103,10 +116,11 @@ function jsonValueToXml(key: string, value: unknown, depth: number, indent: stri
       return `${pad}<${tag}${attrs}/>\n`;
     }
     if (children.length === 0 && textEntry) {
-      return `${pad}<${tag}${attrs}>${String(textEntry[1])}</${tag}>\n`;
+      return `${pad}<${tag}${attrs}>${escapeXml(String(textEntry[1]))}</${tag}>\n`;
     }
     const inner = children.map(([k, v]) => jsonValueToXml(k, v, depth + 1, indent)).join("");
-    return `${pad}<${tag}${attrs}>\n${inner}${pad}</${tag}>\n`;
+    const text = textEntry ? escapeXml(String(textEntry[1])) : "";
+    return `${pad}<${tag}${attrs}>${text}\n${inner}${pad}</${tag}>\n`;
   }
 
   const text = value === null || value === undefined ? "" : String(value);
@@ -118,18 +132,22 @@ export function jsonToXml(input: string, indentSize: IndentSize): ParseResult<st
   if (!parsed.ok) return parsed;
   const indent = indentString(indentSize);
   const root = parsed.value;
-  if (Array.isArray(root)) {
-    const inner = root.map((item) => jsonValueToXml("item", item, 1, indent)).join("");
-    return { ok: true, value: `<root>\n${inner}</root>` };
+  try {
+    if (Array.isArray(root)) {
+      const inner = root.map((item) => jsonValueToXml("item", item, 1, indent)).join("");
+      return { ok: true, value: `<root>\n${inner}</root>` };
+    }
+    return { ok: true, value: jsonValueToXml("root", root, 0, indent).trimEnd() };
+  } catch (err) {
+    return { ok: false, error: { message: err instanceof Error ? err.message : "Unable to convert to XML." } };
   }
-  return { ok: true, value: jsonValueToXml("root", root, 0, indent).trimEnd() };
 }
 
 function xmlNodeToJson(el: Element): unknown {
   const attrs = Array.from(el.attributes);
   const childElements = Array.from(el.children);
   const textContent = Array.from(el.childNodes)
-    .filter((n) => n.nodeType === Node.TEXT_NODE)
+    .filter((n) => n.nodeType === Node.TEXT_NODE || n.nodeType === Node.CDATA_SECTION_NODE)
     .map((n) => n.textContent ?? "")
     .join("")
     .trim();
@@ -138,7 +156,7 @@ function xmlNodeToJson(el: Element): unknown {
     return textContent;
   }
 
-  const obj: Record<string, unknown> = {};
+  const obj: Record<string, unknown> = Object.create(null);
   attrs.forEach((a) => {
     obj[XML_ATTR_PREFIX + a.name] = a.value;
   });
@@ -154,7 +172,7 @@ function xmlNodeToJson(el: Element): unknown {
     obj[tag] = values.length === 1 ? values[0] : values;
   });
 
-  if (textContent && childElements.length === 0) {
+  if (textContent) {
     obj[XML_TEXT_KEY] = textContent;
   }
 
