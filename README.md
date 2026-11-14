@@ -1,14 +1,29 @@
 # Universal Data Formatter
 
+[![CI](https://github.com/hardworkingmission/universal-data-formatter/actions/workflows/ci.yml/badge.svg)](https://github.com/hardworkingmission/universal-data-formatter/actions/workflows/ci.yml)
+
 A client-side tool for converting, validating, and beautifying structured
 data — JSON, CSV, XML, YAML, and plain text. Everything runs in the
 browser; no input ever leaves the page.
+
+## Highlights
+
+- Format and validate five data formats in a side-by-side editor.
+- Convert between JSON and CSV, XML, or YAML.
+- Compare input and output with a line-level diff.
+- Generate TypeScript types and JSON Schema from JSON samples.
+- Upload files, copy or download results, and chain operations by swapping panes.
+- Process data locally without an account, API key, or database.
+
+Built with **Next.js App Router, React, TypeScript, Tailwind CSS, and CodeMirror 6**.
 
 ## Setup
 
 Use Node.js **24.x** (also specified in `.nvmrc` and `package.json`).
 
 ```bash
+git clone https://github.com/hardworkingmission/universal-data-formatter.git
+cd universal-data-formatter
 npm ci
 npm run dev
 ```
@@ -26,6 +41,17 @@ This runs ESLint, TypeScript, regression tests (including browser interactions),
 and the production build. Tests cover XML content preservation, conversion errors,
 schema generation, and switching output formats. To use an installed Chrome browser
 instead, set `PLAYWRIGHT_CHANNEL=chrome` when running tests.
+
+GitHub Actions runs the same checks on pushes to `main` and pull requests.
+
+## Contributing
+
+Issues and pull requests are welcome. For a bug report, include the input format,
+action, expected result, and a small sample that reproduces the issue. Use synthetic
+data instead of personal or confidential information.
+
+Before opening a pull request, run `npm run check` and update regression coverage
+when changing parsing or conversion behavior.
 
 ## Deploy to Vercel
 
